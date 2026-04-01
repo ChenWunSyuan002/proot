@@ -4,7 +4,7 @@ PROOT  = $(DIR)/../src/proot
 CC     = gcc
 PROOT_RAW = $(PROOT)
 
-CHECK_TESTS = $(patsubst %,check-%, $(wildcard test-*.sh) $(wildcard test-*.c))
+CHECK_TESTS = $(patsubst %,check-%, $(wildcard test-*.sh) $(wildcard test-*.c) $(wildcard openat2.c))
 
 .PHONY: check clean_failure check_failure setup check-%
 
@@ -84,6 +84,9 @@ check-test-9c07fad8.c: test-9c07fad8
 	$(call check_c,$<,$(PROOT) ./$<)
 
 check-test-fa205b56.c: test-fa205b56
+	$(call check_c,$<,$(PROOT) ./$<)
+
+check-openat2.c: openat2
 	$(call check_c,$<,$(PROOT) ./$<)
 
 check_c = $(Q)if [ -e $< ]; then			\
@@ -202,6 +205,9 @@ test-fa205b56: test-fa205b56.c
 
 test-c47aeb7d: test-c47aeb7d.c
 	$(Q)$(CC) $< -pthread -o $@ $(silently) || true
+
+openat2: openat2.c
+	$(Q)$(CC) $< -o $@ $(silently) || true
 
 ######################################################################
 # Beautified output
