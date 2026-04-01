@@ -7,6 +7,7 @@
 #include <linux/net.h> /* SYS_SENDMMSG */
 #include <assert.h>    /* assert(3), */
 #include <time.h>      /* time(2), */
+#include <stdint.h>    /* uint64_t */
 
 #include "extension/extension.h"
 #include "cli/note.h"
@@ -555,6 +556,32 @@ static int handle_seccomp_event_common(Tracee *tracee)
 		if (sxid != sxid_ && sxid != -1)
 			ret = -EPERM;
 		set_result_after_seccomp(tracee, ret);
+		break;
+	}
+
+	case PR_openat2: {
+		/* openat2 may be blocked by Android's seccomp policy.
+		 * Fall back to openat, dropping the resolve flags.
+		 *
+		 * openat2(dirfd, pathname, &how, sizeof(how))
+		 *   -> openat(dirfd, pathname, how.flags, how.mode) */
+		uint64_t how_buf[3] = {}; /* flags, mode, resolve */
+		word_t how_addr = peek_reg(tracee, CURRENT, SYSARG_3);
+		word_t how_size = peek_reg(tracee, CURRENT, SYSARG_4);
+
+		if (how_size > sizeof(how_buf))
+			how_size = sizeof(how_buf);
+		ret = read_data(tracee, how_buf, how_addr, how_size);
+		if (ret < 0) {
+			set_result_after_seccomp(tracee, ret);
+			break;
+		}
+
+		set_sysnum(tracee, PR_openat);
+		/* SYSARG_1 (dirfd) and SYSARG_2 (pathname) stay the same. */
+		poke_reg(tracee, SYSARG_3, (word_t) how_buf[0]); /* flags */
+		poke_reg(tracee, SYSARG_4, (word_t) how_buf[1]); /* mode  */
+		restart_syscall_after_seccomp(tracee);
 		break;
 	}
 

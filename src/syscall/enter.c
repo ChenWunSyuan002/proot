@@ -29,6 +29,7 @@
 #include <string.h>      /* strcpy */
 #include <sys/prctl.h>   /* PR_SET_DUMPABLE */
 #include <termios.h>     /* TCSETS, TCSANOW */
+#include <linux/openat2.h> /* struct open_how, RESOLVE_* */
 
 #include "cli/note.h"
 #include "syscall/syscall.h"
@@ -529,6 +530,53 @@ int translate_syscall_enter(Tracee *tracee)
 		else
 			status = translate_path2(tracee, dirfd, path, SYSARG_2, REGULAR);
 		break;
+
+	case PR_openat2: {
+		struct open_how how;
+		word_t how_addr;
+		word_t how_size;
+
+		dirfd = peek_reg(tracee, CURRENT, SYSARG_1);
+
+		status = get_sysarg_path(tracee, path, SYSARG_2);
+		if (status < 0)
+			break;
+
+		/* Read the open_how structure from tracee memory. */
+		how_addr = peek_reg(tracee, CURRENT, SYSARG_3);
+		how_size = peek_reg(tracee, CURRENT, SYSARG_4);
+
+		memset(&how, 0, sizeof(how));
+		status = read_data(tracee, &how,  how_addr,
+				how_size < sizeof(how) ? how_size : sizeof(how));
+		if (status < 0)
+			break;
+
+		flags = how.flags;
+
+		if (   ((flags & O_NOFOLLOW) != 0)
+		    || ((flags & O_EXCL) != 0 && (flags & O_CREAT) != 0))
+			status = translate_path2(tracee, dirfd, path, SYSARG_2, SYMLINK);
+		else
+			status = translate_path2(tracee, dirfd, path, SYSARG_2, REGULAR);
+		if (status < 0)
+			break;
+
+		/* Strip RESOLVE_IN_ROOT and RESOLVE_BENEATH since proot
+		 * already confines paths to the guest rootfs.  Leaving
+		 * them in would cause the kernel to resolve against the
+		 * *host* dirfd, which is wrong after path translation. */
+		if (how.resolve & (RESOLVE_IN_ROOT | RESOLVE_BENEATH)) {
+			how.resolve &= ~(uint64_t)(RESOLVE_IN_ROOT | RESOLVE_BENEATH);
+			status = write_data(tracee, how_addr, &how,
+					how_size < sizeof(how) ? how_size : sizeof(how));
+			if (status < 0)
+				break;
+		}
+
+		status = 0;
+		break;
+	}
 
 	case PR_readlinkat:
 	case PR_unlinkat:
